@@ -1,4 +1,5 @@
 #handlers.py file
+import sqlite3
 
 from aiogram  import Router, types
 from aiogram.filters import CommandStart, Command
@@ -6,6 +7,7 @@ import json
 import os
 from datetime import datetime
 
+from core.content_ai import generate_reply
 from core.xp_engine import XPManager
 
 router = Router()
@@ -30,7 +32,6 @@ def save_user(user_id, data):
 	users[str(user_id)] = data
 	with open(DB_PATH, 'w', encoding='utf-8') as f:
 		json.dump(users, f, ensure_ascii = False, indent = 4 )
-#-------------------------------------------------------------------------------------------------------#
 
 # Команда start. Сохранение пользователя в JSON и отображение о его статусе в регистрации
 @router.message(CommandStart())
@@ -50,7 +51,6 @@ async def start_cmd(message: types.Message):
 	else:
 		save_user(user.id, user_data)
 		await message.answer(f'Привет, {user.first_name}! Добро пожаловаться в 🌿 Чистый Ум.\nТы зарегистрирован."')
-#-------------------------------------------------------------------------------------------------------#
 
 # Команда /gainxp — добавить XP вручную
 @router.message(Command('gainxp'))
@@ -65,6 +65,19 @@ async def gain_xp_handler(message: types.Message):
 async def show_profile(message: types.Message):
 	xp_manager = XPManager(user_id=message.from_user.id)
 	await message.answer(xp_manager.status())
+#-------------------------------------------------------------------------------------------------------#
+
+@router.message(Command('ask'))
+async def ask_sage(message: types.Message):
+	await message.answer("💭 Думаю над ответом...")
+
+	user_input = message.text.replace('/ask', '').strip()
+	if not user_input:
+		await message.answer("❓ Напиши, что тебя беспокоит. Пример: /ask как мне контролировать желания")
+		return
+
+	reply = await generate_reply(user_id = message.from_user.id, user_message = user_input)
+	await message.answer(reply)
 #-------------------------------------------------------------------------------------------------------#
 
 #вступительное сообщение Должно быть в конце
