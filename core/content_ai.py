@@ -4,25 +4,33 @@ from openai import AsyncOpenAI
 
 from config import GPT_TOKEN
 from core.token_manager import token_db
-
+import tiktoken
 # Инициализируем OpenAI-клиент один раз (оптимизация)
 client = AsyncOpenAI(api_key=GPT_TOKEN)
+model_name = "gpt-3.5-turbo"
 
 # Тарифы OpenAI (актуальные на 2024)
 INPUT_PRICE = 0.50 / 1_000_000  # $ за токен ввода
 OUTPUT_PRICE = 1.50 / 1_000_000  # $ за токен вывода
 ESTIMATED_BALANCE = 5.00  # Ваш депозит $5
-
+MAX_INPUT_TOKENS = 1500 #максимум токенов на ввод
+MAX_OUTPUT_TOKENS = 400#максимум токенов на вывод
+TOKENS_FOR_USERS = 5000 #всего токенов на пользователя
 
 # Основная функция генерации ответа
 async def generate_reply(user_id: int, user_message: str) -> str:
-    if token_db.get_tokens(user_id) >= 5000: # Лимит на 1 пользователя в день
+    # Проверяем длину вопроса
+    encoding = tiktoken.encoding_for_model(model_name)
+    input_tokens = len(encoding.encode(user_message))
+    if input_tokens > MAX_INPUT_TOKENS:
+        return f'❌ Вопрос слишком длинный. Сократите до ~{MAX_INPUT_TOKENS} символов.'
+    if token_db.get_tokens(user_id) >= TOKENS_FOR_USERS: # Лимит на 1 пользователя в день
         return "❌ Лимит токенов исчерпан. Попробуйте завтра."
     if is_gibberish(user_message):
         return f"⚠️ Запрос отклонён: некорректный ввод."
     try:
         response = await client.chat.completions.create(
-            model = "gpt-3.5-turbo",
+            model = model_name,
             messages = [
                 {
                     # Описываем роль модели Инструкция GPT — как ему вести себя
@@ -36,7 +44,7 @@ async def generate_reply(user_id: int, user_message: str) -> str:
                 }
             ],
             temperature=0.7, #Контроль креативности (0.3 — строго, 1.0 — свободно)
-            max_tokens =  350,
+            max_tokens =  MAX_OUTPUT_TOKENS,
             top_p=0.9,
             frequency_penalty=0.3, #Наказание за повтор слов, делает речь живее
         )
