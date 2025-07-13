@@ -7,6 +7,8 @@ import json
 import os
 from datetime import datetime
 
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+
 from core.content_ai import generate_reply
 from core.xp_engine import XPManager
 
@@ -43,7 +45,8 @@ async def start_cmd(message: types.Message):
 		'username': user.username,
 		'registered': datetime.now().isoformat(),
 		'experience': 0,
-		'level': 1
+		'level': 1,
+		'tone': 'soft' # Стиль общения ( мягкий по умолчанию): soft, strict, funny
 	}
 	if str(user.id) in load_users():
 		await message.answer("Вы уже зарегистрированы!")
@@ -67,6 +70,36 @@ async def show_profile(message: types.Message):
 	await message.answer(xp_manager.status())
 #-------------------------------------------------------------------------------------------------------#
 
+#Команда для выбора стиля общения
+@router.message(Command('style'))
+async def choose_style(message: types.Message):
+	keyboard = InlineKeyboardMarkup(inline_keyboard=[
+	[
+		InlineKeyboardButton(text='🧘 МЯГКИЙ', callback_data='style_soft'),
+		InlineKeyboardButton(text = '🪖 СТРОГИЙ', callback_data='style_strict'),
+		InlineKeyboardButton(text = '😅 ЮМОРНОЙ', callback_data='style_funny'),
+		InlineKeyboardButton(text = '😐 СТАНДАРТ', callback_data='style_standard')
+	]
+	])
+	await message.answer('Выберите стиль общения:', reply_markup=keyboard)
+#-------------------------------------------------------------------------------------------------------#
+
+#Обработка выбора стиля
+@router.callback_query(lambda c: c.data.startswith('style_'))
+async def set_style(callback: CallbackQuery):
+	style = callback.data.split('_')[1]
+	users = load_users()
+	user_id = str(callback.from_user.id)
+
+	if user_id in users:
+		users[user_id]['tone'] = style
+		save_user(user_id, users[user_id])
+		await callback.message.edit_text(f"✅ Стиль общения установлен: {style}")
+	else:
+		await callback.message.edit_text('⚠️ Сначала нужно пройти регистрацию — нажми /start')
+#-------------------------------------------------------------------------------------------------------#
+
+#Добовляет кнопку с возможность общения с ИИ
 @router.message(Command('ask'))
 async def ask_sage(message: types.Message):
 	await message.answer("💭 Думаю над ответом...")
