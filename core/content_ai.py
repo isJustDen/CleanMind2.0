@@ -1,13 +1,19 @@
 #content_ai - file
 #-------------------------------------------------------------------------------------------------------#
+
 import json
 import os.path
 
+import requests
 from openai import AsyncOpenAI
-
-from config import GPT_TOKEN
+from datetime import datetime
+from config import GPT_TOKEN, UNSPLASH_KEY
 from core.token_manager import token_db
 import tiktoken
+
+UNSPLASH_ACCESS_KEY = UNSPLASH_KEY
+
+AFF_PATH = 'assets/affirmations.json'
 # Инициализируем OpenAI-клиент один раз (оптимизация)
 client = AsyncOpenAI(api_key=GPT_TOKEN)
 model_name = "gpt-3.5-turbo"
@@ -113,12 +119,28 @@ async def generate_reply(user_id: int, user_message: str) -> str:
         return response.choices[0].message.content.strip()
 
     except Exception as e:
-        return f'"⚠️ Ошибка при обращении к GPT: {str(e)}'
+        return f'"⚠️ Ошибка при обращении к ИИ: {str(e)}'
+#-------------------------------------------------------------------------------------------------------#
 
+# Защита первого уровня от спама и бессмысленных сообщений
 def is_gibberish(text: str) -> bool:
-    # Проверка на повторяющиеся символы/слова
-    if len(set(text))< len(text)*0.3: # 70% повторений
+    """Улучшенная проверка на бессмысленный текст"""
+    # Удаляем пунктуацию и приводим к нижнему регистру
+    clean_text = ''.join(c.lower() for c in text if c.isalpha() or c.isspace())
+
+    # Слишком короткий текст
+    if len(clean_text) < 10:
         return True
+
+    # Проверяем повторяющиеся слова (если больше 3 слов)
+    words = clean_text.split()
+    if len(words) > 3 and len(set(words)) < len(words) / 2:
+        return True
+
+    # Проверяем повторяющиеся последовательности символов
+    if any(text.count(text[i:i + 5]) > 2 for i in range(len(text) - 4)):
+        return True
+
     return False
 
 #-------------------------------------------------------------------------------------------------------#
@@ -131,4 +153,55 @@ def get_user_tone(user_id: int) -> str:
         users = json.load(f)
     user = users.get(str(user_id))
     return user.get('tone', 'soft') if user else 'soft'
+#-------------------------------------------------------------------------------------------------------#
+
+#    Создание новой аффирмации через GPT
+async def generate_affirmations(period: str) -> dict:
+    prompt = f'Придумай вдохновляющую, аффирмацию на тему саморазвития для времени: {period}.Со смыслом и глубокие. Не забывай хвалить в тернистом пути развивающегося. Не повторяй уже известные. Только текст.'
+    response = await generate_reply(user_id = 999, user_message = prompt)
+
+    # Псевдо-изображение (можно заменить на запрос к Unsplash)
+    image_url = await get_unsplash_image(period)
+
+    # Загружаем и обновляем JSON
+    with open(AFF_PATH, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+
+        new_item ={
+            'text': response.strip('"\''),
+            'image': image_url
+        }
+        data[period].append(new_item)
+        with open(AFF_PATH, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+
+        if image_url.startswith("https://images.unsplash.com"):
+            new_item['image_source'] = 'unsplash'
+        return new_item
+#-------------------------------------------------------------------------------------------------------#
+
+#случайное изображение по тематике периода
+async def get_unsplash_image(period: str) -> str:
+    """Получает случайное изображение по тематике периода"""
+    themes = {
+        "morning": "sunrise,morning,coffee,meditation",
+        "day": "productivity,work,focus,discipline",
+        "evening": "sunset,evening,relax,peace"
+    }
+    try:
+        url = "https://api.unsplash.com/photos/random"
+        params = {
+            'query': themes[period],
+            'client_id': UNSPLASH_ACCESS_KEY,
+            'orientation': 'landscape',
+            'w': 600,
+            'h': 400,
+        }
+        response = requests.get(url, params=params, timeout=5).json()
+        return response['urls']['regular']
+    except Exception as e:
+        print(f"Ошибка Unsplash API: {e}")
+        # Fallback на стандартный URL с таймстампом для уникальности
+        return f"https://source.unsplash.com/600x400/?{themes[period]},{int(datetime.now().timestamp())}"
+
 #-------------------------------------------------------------------------------------------------------#
