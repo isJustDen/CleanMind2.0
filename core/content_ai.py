@@ -1,4 +1,4 @@
-#content_ai - file
+#core/content_ai - file
 #-------------------------------------------------------------------------------------------------------#
 
 import json
@@ -7,7 +7,7 @@ import os.path
 import requests
 from openai import AsyncOpenAI
 from datetime import datetime
-from config import GPT_TOKEN, UNSPLASH_KEY
+from config import GPT_TOKEN, UNSPLASH_KEY, DAILY_TOKEN_LIMIT
 from core.token_manager import token_db
 import tiktoken
 
@@ -24,7 +24,7 @@ OUTPUT_PRICE = 1.50 / 1_000_000  # $ за токен вывода
 ESTIMATED_BALANCE = 5.00  # Ваш депозит $5
 MAX_INPUT_TOKENS = 1500 #максимум токенов на ввод
 MAX_OUTPUT_TOKENS = 400#максимум токенов на вывод
-TOKENS_FOR_USERS = 15000 #всего токенов на пользователя
+TOKENS_FOR_USERS = DAILY_TOKEN_LIMIT #всего токенов на пользователя
 
 # Основная функция генерации ответа
 async def generate_reply(user_id: int, user_message: str) -> str:
@@ -146,10 +146,10 @@ def is_gibberish(text: str) -> bool:
 #-------------------------------------------------------------------------------------------------------#
 #Подгрузка тонов из json базы данных
 def get_user_tone(user_id: int) -> str:
-    db_path = os.path.join('db', 'users.json')
-    if not os.path.exists(db_path):
+    DB_USERS_PATH = os.path.join('db', 'users.json')
+    if not os.path.exists(DB_USERS_PATH):
         return 'soft'
-    with open(db_path, 'r', encoding='utf-8') as f:
+    with open(DB_USERS_PATH, 'r', encoding='utf-8') as f:
         users = json.load(f)
     user = users.get(str(user_id))
     return user.get('tone', 'soft') if user else 'soft'

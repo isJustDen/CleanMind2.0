@@ -1,12 +1,15 @@
 # bot/scheduler.py file
 from datetime import datetime
 
+import aiosqlite
 from aiogram import Bot
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
+from config import ADMIN_ID, FEEDBACK_NOTIFY_INTERVAL
 from core.content_ai import generate_reply
 from core.xp_engine import load_users, XPManager
+from db.database import SQLITE_DB_PATH
 
 scheduler = AsyncIOScheduler()
 
@@ -41,8 +44,19 @@ async def evening_reflection(bot: Bot):
 
 def setup_scheduler(bot: Bot):
 	# Тестовый триггер - каждые 5 минут (для отладки)
-	scheduler.add_job(morning_affirmation, CronTrigger(hour=7, minute=5), kwargs={'bot': bot}, id='morning_affirmation')
+	scheduler.add_job(morning_affirmation, CronTrigger(hour=7, minute=0), kwargs={'bot': bot}, id='morning_affirmation')
 	scheduler.add_job(evening_reflection, CronTrigger(hour=21, minute=0), kwargs={'bot': bot},  id='evening_reflection')
 	scheduler.start()
+	scheduler.add_job(notify_new_feedbacks, 'interval', seconds = FEEDBACK_NOTIFY_INTERVAL, kwargs={'bot': bot})
 	print("✅ Планировщик успешно запущен")
+#-------------------------------------------------------------------------------------------------------#
+
+async def notify_new_feedbacks(bot: Bot):
+	"""Уведомление админа о новых фидбеках"""
+	async with aiosqlite.connect(SQLITE_DB_PATH) as db:
+		cursor = await db.execute("SELECT COUNT(*) FROM feedback WHERE status = 'new'")
+		count = (await cursor.fetchone())[0]
+
+	if count>0:
+		await bot.send_message(ADMIN_ID, f"📭 У вас {count} непрочитанных отзывов. Проверить: /feedbacks")
 

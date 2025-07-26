@@ -1,4 +1,4 @@
-#xp_engine.py file
+#core/xp_engine.py file
 
 import json
 import os

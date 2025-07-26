@@ -1,4 +1,4 @@
-#affirmation_tracker.py file
+#core/affirmation_tracker.py file
 
 import os
 import sqlite3

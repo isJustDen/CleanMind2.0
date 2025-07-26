@@ -1,9 +1,11 @@
-#handlers.py file
+#bot/handlers.py file
 import sqlite3
 import random
 from zoneinfo import ZoneInfo
 
-from aiogram  import Router, types
+
+import aiosqlite
+from aiogram import Router, types, F
 from aiogram.filters import CommandStart, Command
 import json
 import os
@@ -11,21 +13,22 @@ from datetime import datetime
 
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton
 
+from config import ADMIN_ID, SQLITE_DB_PATH, DB_DIR
 from core.affirmation_tracker import affirmation_db
 from core.content_ai import generate_reply, generate_affirmations
 from core.xp_engine import XPManager
 
 router = Router()
 os.makedirs("db", exist_ok=True)
-DB_PATH = os.path.join("db", 'users.json')
+USERS_JSON_PATH = os.path.join(DB_DIR, 'users.json')
 #-------------------------------------------------------------------------------------------------------#
 
 #Функция Загрузка параметров пользователя из JSON файла
 def load_users():
-	if not os.path.exists(DB_PATH) or os.path.getsize(DB_PATH) == 0:
+	if not os.path.exists(USERS_JSON_PATH) or os.path.getsize(USERS_JSON_PATH) == 0:
 		return {}
 	try:
-		with open(DB_PATH, 'r', encoding='utf-8') as f:
+		with open(USERS_JSON_PATH, 'r', encoding='utf-8') as f:
 			return json.load(f)
 	except json.JSONDecodeError:
 		return {}
@@ -35,7 +38,7 @@ def load_users():
 def save_user(user_id, data):
 	users = load_users()
 	users[str(user_id)] = data
-	with open(DB_PATH, 'w', encoding='utf-8') as f:
+	with open(USERS_JSON_PATH, 'w', encoding='utf-8') as f:
 		json.dump(users, f, ensure_ascii = False, indent = 4 )
 #-------------------------------------------------------------------------------------------------------#
 
@@ -149,7 +152,7 @@ async def give_affirmation(message: types.Message):
 		data = json.load(f)
 
 	# 1 шанс из 3 — генерация
-	if random.randint(1, 3) == 1 or len(data.get(period, []) < 3):
+	if random.randint(1, 3) == 1 or len(data.get(period, [])) < 3:
 		affirmation = await generate_affirmations(period)
 	else:
 		affirmation = random.choice(data[period])
@@ -176,9 +179,83 @@ async def give_affirmation(message: types.Message):
 		print(f"Ошибка: {e}")
 		await message.answer("🧘 Я сосредоточен и развиваюсь каждый день\n\n+15 XP")
 
+#-------------------------------------------------------------------------------------------------------#
+@router.message(Command('feedback'))
+async def feedback_cmd(message: types.Message):
+	"""Отправка обратной связи"""
+	await message.answer("💬 Напиши свое предложение, жалобу или отзыв.\n"
+        "Мы читаем все сообщения и улучшаем бота благодаря вам!",
+	                     reply_markup=types.ForceReply(selective=True)
+	                     )
+
+@router.message(F.reply_to_message & F.reply_to_message.text.contains ('💬 Напиши свое предложение'))
+async def process_feedback(message: types.Message):
+	"""Обработка содержимого фидбека"""
+	feedback_text = message.text
+	user_id = message.from_user.id
+
+	try:
+		#Сохраняем в БД
+		async with aiosqlite.connect(SQLITE_DB_PATH) as db:
+			await db.execute(
+				"INSERT INTO feedback (user_id, message) VALUES (?, ?)",
+				(user_id, feedback_text)
+			)
+			await db.commit()
+		await message.answer("✅ Спасибо! Твой отзыв сохранён и будет рассмотрен.")
+
+		# Отправка админу
+		admin_msg = (f'📢 Новый фидбек от @{message.from_user.username}!\n'
+		             f'{feedback_text}\n\n'
+		             f'ID: {user_id}')
+		await message.bot.send_message(ADMIN_ID, admin_msg)
+
+	except Exception as e:
+		print(f'Feedback error: {e}')
+		await message.answer(("⚠️ Произошла ошибка при сохранении отзыва."))
+
+#Добавим команду для админа
+@router.message(Command('feedbacks'))
+async def view_feedbacks(message: types.Message):
+	"""Просмотр непрочитанных фидбеков (только для админа)"""
+	if message.from_user.id != ADMIN_ID:
+		return await message.answer('⛔ Доступ запрещён')
+
+	async with aiosqlite.connect(SQLITE_DB_PATH) as db:
+		cursor = await db.execute("SELECT id, user_id, message FROM feedback WHERE status = 'new' LIMIT 10")
+		feedbacks = await cursor.fetchall()
+
+	if not feedbacks:
+		return await message.answer("📭 Нет новых отзывов")
+
+	response = ['📬 Непрочитанные отзывы:\n"']
+	for fb in feedbacks:
+		response.append(f'ID: {fb[0]}\nUser: {fb[1]}\nMessage: {fb[2]}\n-----')
+
+		# Разбиваем на несколько сообщений если слишком длинное
+	for chunk in [response[i:i+3] for i in range(0, len(response), 3)]:
+		await message.answer('\n'.join(chunk))
+
+#Добавим обработку фидбеков
+@router.message(Command('resolve_fb'))
+async def resolve_feedback(message: types.Message):
+	"""Пометить фидбек как обработанный"""
+	if message.from_user.id != ADMIN_ID:
+		return
+
+	try:
+		fb_id = int(message.text.split()[1])
+		async with aiosqlite.connect(SQLITE_DB_PATH) as db:
+			await db.execute(
+				"UPDATE feedback SET status = 'processed' WHERE id = ?",
+				(fb_id,)
+			)
+			await db.commit()
+		await message.answer(f"✅ Фидбек #{fb_id} помечен как обработанный")
+	except (IndexError, ValueError):
+		await message.answer('Использование: /resolve_fb <id_фидбека>')
 
 
-
 #-------------------------------------------------------------------------------------------------------#
 #-------------------------------------------------------------------------------------------------------#
 #-------------------------------------------------------------------------------------------------------#
@@ -190,16 +267,30 @@ async def give_affirmation(message: types.Message):
 #-------------------------------------------------------------------------------------------------------#
 
 #-------------------------------------------------------------------------------------------------------#
+#Кнопка фидбека в главном меню
+@router.message(F.text == "💬 Оставить отзыв")
+async def feedback_button(message: types.Message):
+	await feedback_cmd(message)
 #вступительное сообщение Должно быть в конце
 @router.message()
 async def intro_message(message: types.Message):
-	await message.answer(
+	welcome_text = (
 		"🌿 Добро пожаловать в \"Чистый Ум\" — бота-наставника на пути мужской силы и ясности разума.\n\n"
 		"Здесь ты научишься:\n"
 		"— Воздержанию и дисциплине\n"
 		"— Контролю над импульсами\n"
 		"— Самонаблюдению и программированию\n\n"
 		"Я не просто бот. Я — твой спутник.\n"
-		"Нажми /start и начнём путь 👣"
+		"Нажми /start и начнём путь 👣")
+
+	#Добавить кнопку фидбека в главное меню:
+	keyboard = ReplyKeyboardMarkup(
+		keyboard=[
+			[KeyboardButton(text="💬 Оставить отзыв")],
+			[KeyboardButton(text="/start"), KeyboardButton(text="/help")]
+		],
+		resize_keyboard = True
 	)
+	await message.answer(welcome_text, reply_markup=keyboard)
+
 #-------------------------------------------------------------------------------------------------------#
