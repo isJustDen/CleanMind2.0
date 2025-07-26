@@ -11,9 +11,11 @@ import json
 import os
 from datetime import datetime
 
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, ReplyKeyboardMarkup, \
+	KeyboardButton, ReplyKeyboardRemove
+from aiogram.utils.keyboard import ReplyKeyboardBuilder
 
-from config import ADMIN_ID, SQLITE_DB_PATH, DB_DIR
+from config import ADMIN_ID, SQLITE_DB_PATH, DB_DIR, is_admin
 from core.affirmation_tracker import affirmation_db
 from core.content_ai import generate_reply, generate_affirmations
 from core.xp_engine import XPManager
@@ -254,9 +256,69 @@ async def resolve_feedback(message: types.Message):
 		await message.answer(f"✅ Фидбек #{fb_id} помечен как обработанный")
 	except (IndexError, ValueError):
 		await message.answer('Использование: /resolve_fb <id_фидбека>')
-
-
 #-------------------------------------------------------------------------------------------------------#
+@router.message(Command('help'))
+async def help_command(message: types.Message):
+	# Проверяем, является ли пользователь админом
+	if is_admin(message.from_user.id):
+		admin_help_text = """
+			<b>🛠 Административные команды:</b>
+
+		/feedbacks - Просмотр новых отзывов
+		/resolve_fb [id] - Пометить отзыв как обработанный
+		/stats - Статистика по пользователям(В разработке!!!)
+		/broadcast - Рассылка сообщения всем пользователям (В разработке!!!)
+
+		<b>🔜 В разработке:</b>
+		/ban - Заблокировать пользователя
+		/promo - Создать промокод
+		/export - Выгрузка данных
+			"""
+	await message.answer(admin_help_text,
+	                     reply_markup=ReplyKeyboardRemove(),
+	                     parse_mode='HTML')
+	# Основные команды для всех пользователей
+	user_help_text = """
+	<b>🌿 Основные команды:</b>
+
+	/start - Начало работы с ботом
+	/help - Показать это сообщение
+	/profile - Ваш прогресс и статистика (В разработке!!!)
+	/affirmation - Получить аффирмацию дня
+	/ask [вопрос] - Задать вопрос мудрецу
+	/feedback - Оставить отзыв или предложение
+	/style - Выбрать стиль общения
+	
+	<b>📝 Работа с дневником:</b>
+	/day - Записать сегодняшние мысли (В разработке!!!)
+	/reset_day - Сбросить текущий день (В разработке!!!)
+	
+	<b>🎮 Геймификация:</b>
+	/me - Ваш текущий уровень и XP
+	/quests - Активные задания (В разработке!!!)
+	
+	<b>🔜 Скоро появится:</b>
+	/meditate - Управляемая медитация
+	/achievements - Ваши достижения
+	/group - Чат поддержки
+	/reminder - Напоминания
+
+	"""
+	# Создаем клавиатуру с быстрыми командами
+	builder = ReplyKeyboardBuilder()
+	builder.row(
+		KeyboardButton(text = '/affirmation'),
+		KeyboardButton(text = '/ask'),
+	)
+	builder.row(
+		KeyboardButton(text = '/day'),
+		KeyboardButton(text = '/profile'),
+	)
+	await message.answer(user_help_text,
+	                     reply_markup = builder.as_markup(resize_keyboard = True),
+	                     parse_mode = 'HTML')
+
+
 #-------------------------------------------------------------------------------------------------------#
 #-------------------------------------------------------------------------------------------------------#
 #-------------------------------------------------------------------------------------------------------#
