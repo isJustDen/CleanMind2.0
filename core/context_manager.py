@@ -4,11 +4,46 @@ from datetime import datetime
 from typing import Dict
 
 import aiosqlite
+import tiktoken
 
-from config import SQLITE_DB_PATH
+from openai import AsyncOpenAI
+
+from config import SQLITE_DB_PATH, GPT_TOKEN
 
 #logger = logging.getLogger(__name__)
 
+#-------------------------------------------------------------------------------------------------------#
+client = AsyncOpenAI(api_key=GPT_TOKEN)
+COMPRESSION_MODEL = "gpt-3.5-turbo"
+
+async def smart_compress(texts: list[str]) -> str:
+	"""Сжимает список сообщений, выделяя ключевые моменты с помощью GPT"""
+	try:
+		# Подготавливаем промпт для сжатия
+		messages = [{
+			"role": "system",
+			"content": "Ты - помощник для сжатия текста. Анализируй историю диалога и выделяй только самое важное: "
+                           "ключевые факты, решения, важные детали. Игнорируй приветствия, повторения и несущественные детали. "
+                           "Суммируй кратко, сохраняя смысл. Возвращай только сжатый вариант, без пояснений."
+		},
+			{"role":"user",
+			 "content": "Сожми этот диалог, сохраняя только самое важное:\n" + "\n".join(texts)},
+		]
+		response = await client.chat.completions.create(
+			model = COMPRESSION_MODEL,
+			messages = messages,
+			temperature=0.3,# Минимальная креативность для точности
+			max_tokens=500 # Лимит на сжатый вариант
+		)
+		return response.choices[0].message.content.strip()
+
+	except Exception as e:
+		print(f"Ошибка при сжатии контекста: {e}")
+		# Возвращаем простое сжатие в случае ошибки
+		return "\n".join([msg[:150] for msg in texts[:3]])
+
+
+#-------------------------------------------------------------------------------------------------------#
 class ContextManager:
 	@staticmethod
 	async def save_message(user_id: int, text: str, role: str):
@@ -31,10 +66,22 @@ class ContextManager:
 			raise
 
 	@staticmethod
-	async def get_recent_history(user_id: int, hours: int = 24, limit: int = 10) -> list[Dict]:
-		"""Получает свежую историю (последние 24 часа по умолчанию)"""
+	async def get_recent_history(user_id: int, limit: int = 15) -> list[Dict]:
+		"""Получает историю, автоматически инициируя сжатие при необходимости"""
 		try:
+			# Проверяем размер истории перед возвратом
 			async with aiosqlite.connect(SQLITE_DB_PATH) as db:
+				cursor = await db.execute("SELECT message_text FROM conversation_history WHERE user_id = ?", (user_id, ))
+				messages = [row[0] for row in await cursor.fetchall()]
+
+				# Проверяем необходимость сжатия
+				encoding = tiktoken.encoding_for_model(COMPRESSION_MODEL)
+				total_tokens = sum(len(encoding.encode(msg)) for msg in messages)
+
+				if total_tokens > 1500:
+					await ContextManager.compress_context(user_id, force = True)
+
+				# Возвращаем актуальную историю
 				cursor = await db.execute(
 					"""
 					SELECT message_text, role FROM conversation_history
@@ -46,39 +93,64 @@ class ContextManager:
 				rows = await cursor.fetchall()
 				return [{'role': row[1], 'content': row[0]} for row in reversed(rows)]
 		except Exception as e:
+			print(f"Ошибка при получении истории: {e}")
 			#logger.error(f"Error getting history: {e}")
 			return []
 
 	@staticmethod
-	async def compress_context(user_id: int):
-		"""Сжимает старый контекст"""
+	async def compress_context(user_id: int, force: bool = False):
+		"""Сжимает контекст с помощью NLP, когда достигается лимит токенов"""
 		try:
 			async with aiosqlite.connect(SQLITE_DB_PATH) as db:
-				# 1. Получаем старые сообщения (1-7 дней)
+				# 1. Проверяем текущий размер истории
+				cursor = await db.execute(
+					"SELECT COUNT(*) FROM conversation_history WHERE user_id = ?", (user_id,))
+				count = (await cursor.fetchone())[0]
+
+				# 2. Получаем все сообщения для анализа
 				cursor = await db.execute(
 					"""SELECT message_text FROM conversation_history
-					WHERE user_id = ? AND timestamp BETWEEN datetime('now', '-7 days') 
-					AND datetime('now', '-1 day')""",
+					WHERE user_id = ? ORDER BY timestamp DESC""",
 					(user_id,)
 				)
-				old_message = [row[0] for row in await cursor.fetchall()]
+				messages = [row[0] for row in await cursor.fetchall()]
+				# 3. Проверяем условия для сжатия:
+				# - Принудительное сжатие (force=True)
+				# - Более 20 сообщений в истории
+				# - Или если суммарный размер > 1500 токенов
+				encoding = tiktoken.encoding_for_model(COMPRESSION_MODEL)
+				total_tokens = sum(len(encoding.encode(msg)) for msg in messages)
 
-				if not old_message:
+				if not force and count < 20 and total_tokens <1500:
+					print("Условие не выполнено, сжатие будет позже")
 					return
 
-				# 2. Здесь должна быть логика сжатия (упрощенная версия)
-				compressed = "\n".join([msg[:100] for msg in old_message[:5]])  # Берем первые 5 сообщений по 100 символов
+				# 4. Применяем умное сжатие
+				compressed = await smart_compress(messages)
 
-				# 3. Сохраняем сжатый контекст
+				# 5. Сохраняем сжатый контекст и очищаем историю
 				await db.execute("""
 				INSERT OR REPLACE INTO context_cache(user_id, compressed_context, last_updated)
 				VALUES(?, ?, datetime('now'))""",
 				                 (user_id, compressed))
+
+				# Оставляем только 5 последних сообщений
+				await db.execute("""
+                DELETE FROM conversation_history
+				WHERE user_id = ? AND id NOT IN(
+				SELECT id FROM (
+				SELECT id FROM conversation_history
+				WHERE user_id = ?
+				ORDER BY timestamp DESC
+				LIMIT 5)
+				)""", (user_id, user_id)
+				)
 				await db.commit()
-				# logger.debug(f"Compressed context for user {user_id}")
+				print("Сжатие прошло успешно")
+		# logger.debug(f"Compressed context for user {user_id}")
 		except Exception as e:
-			print(e)
-			#logger.error(f"Error compressing context: {e}")
+			print(f"Ошибка при сжатии контекста: {e}")
+		#logger.error(f"Error compressing context: {e}")
 
 	@staticmethod
 	async def get_compressed_context(user_id: int) -> str:
@@ -110,4 +182,7 @@ class ContextManager:
 		except Exception as e:
 			#logger.error(f"Error clearing context: {e}")
 			print(e)
+#-------------------------------------------------------------------------------------------------------#
+
+
 

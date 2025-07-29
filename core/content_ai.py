@@ -33,8 +33,9 @@ TOKENS_FOR_USERS = DAILY_TOKEN_LIMIT #всего токенов на польз�
 async def generate_reply(user_id: int, user_message: str) -> str:
     # Проверяем длину вопроса
     encoding = tiktoken.encoding_for_model(model_name)
-    input_tokens = len(encoding.encode(user_message))
-    if input_tokens > MAX_INPUT_TOKENS:
+    current_tokens  = len(encoding.encode(user_message))
+
+    if current_tokens  > MAX_INPUT_TOKENS:
         return f'❌ Вопрос слишком длинный. Сократите до ~{MAX_INPUT_TOKENS} символов.'
     if token_db.get_tokens(user_id) >= TOKENS_FOR_USERS: # Лимит на 1 пользователя в день
         return "❌ Лимит токенов исчерпан. Попробуйте завтра."
@@ -65,6 +66,13 @@ async def generate_reply(user_id: int, user_message: str) -> str:
     # Получаем контекст
     history = await ContextManager.get_recent_history(user_id)
     compressed_context = await ContextManager.get_compressed_context(user_id)
+
+    # Проверяем общий размер токенов
+    total_tokens = current_tokens + sum(len(encoding.encode(msg['content'])) for msg in history)
+    if total_tokens > 1500:
+        await ContextManager.compress_context(user_id, force=True)
+        history = await ContextManager.get_recent_history(user_id) # Обновляем историю после сжатия
+
 
     message = [
                 {
