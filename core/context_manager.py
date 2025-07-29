@@ -27,7 +27,7 @@ async def smart_compress(texts: list[str]) -> str:
                            "Суммируй кратко, сохраняя смысл. Возвращай только сжатый вариант, без пояснений."
 		},
 			{"role":"user",
-			 "content": "Сожми этот диалог, сохраняя только самое важное:\n" + "\n".join(texts)},
+			 "content": "Сожми этот диалог, сохраняя только самое важное и факты:\n" + "\n".join(texts)},
 		]
 		response = await client.chat.completions.create(
 			model = COMPRESSION_MODEL,
