@@ -207,7 +207,13 @@ async def get_unsplash_image(period: str) -> str:
             'h': 400,
         }
         response = requests.get(url, params=params, timeout=5).json()
-        return response['urls']['regular']
+        response.raise_for_status() # Проверка на ошибки HTTP
+        data = response.json()
+
+        if 'urls' not in data:
+            raise ValueError ("Invalid Unsplash API response")
+
+        return data['urls']['regular']
     except Exception as e:
         print(f"Ошибка Unsplash API: {e}")
         # Fallback на стандартный URL с таймстампом для уникальности

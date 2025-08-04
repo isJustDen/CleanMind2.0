@@ -1,5 +1,4 @@
 #bot/handlers.py file
-import sqlite3
 import random
 from zoneinfo import ZoneInfo
 
@@ -21,7 +20,7 @@ from core.content_ai import generate_reply, generate_affirmations
 from core.context_manager import ContextManager
 from core.xp_engine import XPManager
 
-router = Router()
+user_router = Router()
 os.makedirs("db", exist_ok=True)
 USERS_JSON_PATH = os.path.join(DB_DIR, 'users.json')
 #-------------------------------------------------------------------------------------------------------#
@@ -63,7 +62,7 @@ def get_period() -> str:
 #-------------------------------------------------------------------------------------------------------#
 
 # Команда /start. Сохранение пользователя в JSON и отображение о его статусе в регистрации
-@router.message(CommandStart())
+@user_router.message(CommandStart())
 async def start_cmd(message: types.Message):
 	user = message.from_user
 	user_data = {
@@ -76,15 +75,24 @@ async def start_cmd(message: types.Message):
 		'tone': 'soft' # Стиль общения ( мягкий по умолчанию): soft, strict, funny
 	}
 	if str(user.id) in load_users():
-		await message.answer("Вы уже зарегистрированы!")
+		await message.answer("""Ты уже зарегистрирован! \n
+		🔍 Знаешь ли ты? Учёные выяснили: 21 день — минимальный срок, чтобы закрепить новую привычку. А 90 дней — чтобы она стала частью твоей личности.
+								🌟 В 🌿 Чистом Уме ты найдёшь:
+								— Ежедневные практики для дисциплины и ясности
+								— Аффирмации и напоминания в нужное время
+								— Систему XP, уровней и достижений для роста
+								🚀 Здесь ты сможешь отслеживать прогресс, получать поддержку и превращать самодисциплину в игру.
+								🛡 Все твои данные надёжно сохраняются и никогда не передаются третьим лицам.
+								👉 Сделай первый шаг: нажми /help и начни путь к сильному уму и телу уже сегодня!""")
 		return
 	else:
 		save_user(user.id, user_data)
-		await message.answer(f'Привет, {user.first_name}! Добро пожаловаться в 🌿 Чистый Ум.\nТы зарегистрирован."')
+		await message.answer(f'Привет, {user.first_name}! Добро пожаловаться в 🌿 Чистый Ум.\nТы успешно зарегистрирован.')
+
 #-------------------------------------------------------------------------------------------------------#
 
 # Команда /gainxp — добавить XP вручную
-@router.message(Command('gainxp'))
+#@user_router.message(Command('gainxp'))
 async def gain_xp_handler(message: types.Message):
 	xp_manager = XPManager(user_id=message.from_user.id)
 	xp_manager.add_xp(50)
@@ -92,14 +100,14 @@ async def gain_xp_handler(message: types.Message):
 #-------------------------------------------------------------------------------------------------------#
 
 # Команда /me — показать статус
-@router.message(Command('me'))
+@user_router.message(Command('me'))
 async def show_profile(message: types.Message):
 	xp_manager = XPManager(user_id=message.from_user.id)
 	await message.answer(xp_manager.status())
 #-------------------------------------------------------------------------------------------------------#
 
 #Команда для выбора стиля общения
-@router.message(Command('style'))
+@user_router.message(Command('style'))
 async def choose_style(message: types.Message):
 	keyboard = InlineKeyboardMarkup(inline_keyboard=[
 	[
@@ -113,7 +121,7 @@ async def choose_style(message: types.Message):
 #-------------------------------------------------------------------------------------------------------#
 
 #Обработка выбора стиля
-@router.callback_query(lambda c: c.data.startswith('style_'))
+@user_router.callback_query(lambda c: c.data.startswith('style_'))
 async def set_style(callback: CallbackQuery):
 	style = callback.data.split('_')[1]
 	users = load_users()
@@ -128,7 +136,7 @@ async def set_style(callback: CallbackQuery):
 #-------------------------------------------------------------------------------------------------------#
 
 #Добавляет кнопку с возможностью общения с ИИ
-@router.message(Command('ask'))
+@user_router.message(Command('ask'))
 async def ask_sage(message: types.Message):
 	await message.answer("💭 Думаю над ответом...")
 
@@ -142,7 +150,7 @@ async def ask_sage(message: types.Message):
 #-------------------------------------------------------------------------------------------------------#\
 
 # Команда /affirmation
-@router.message(Command('affirmation'))
+@user_router.message(Command('affirmation'))
 async def give_affirmation(message: types.Message):
 	period = get_period()
 	user_id = message.from_user.id
@@ -183,7 +191,7 @@ async def give_affirmation(message: types.Message):
 		await message.answer("🧘 Я сосредоточен и развиваюсь каждый день\n\n+15 XP")
 
 #-------------------------------------------------------------------------------------------------------#
-@router.message(Command('feedback'))
+@user_router.message(Command('feedback'))
 async def feedback_cmd(message: types.Message):
 	"""Отправка обратной связи"""
 	await message.answer("💬 Напиши свое предложение, жалобу или отзыв.\n"
@@ -191,7 +199,7 @@ async def feedback_cmd(message: types.Message):
 	                     reply_markup=types.ForceReply(selective=True)
 	                     )
 
-@router.message(F.reply_to_message & F.reply_to_message.text.contains ('💬 Напиши свое предложение'))
+@user_router.message(F.reply_to_message & F.reply_to_message.text.contains ('💬 Напиши свое предложение'))
 async def process_feedback(message: types.Message):
 	"""Обработка содержимого фидбека"""
 	feedback_text = message.text
@@ -217,48 +225,8 @@ async def process_feedback(message: types.Message):
 		print(f'Feedback error: {e}')
 		await message.answer(("⚠️ Произошла ошибка при сохранении отзыва."))
 
-#Добавим команду для админа
-@router.message(Command('feedbacks'))
-async def view_feedbacks(message: types.Message):
-	"""Просмотр непрочитанных фидбеков (только для админа)"""
-	if message.from_user.id != ADMIN_ID:
-		return await message.answer('⛔ Доступ запрещён')
-
-	async with aiosqlite.connect(SQLITE_DB_PATH) as db:
-		cursor = await db.execute("SELECT id, user_id, message FROM feedback WHERE status = 'new' LIMIT 10")
-		feedbacks = await cursor.fetchall()
-
-	if not feedbacks:
-		return await message.answer("📭 Нет новых отзывов")
-
-	response = ['📬 Непрочитанные отзывы:\n"']
-	for fb in feedbacks:
-		response.append(f'ID: {fb[0]}\nUser: {fb[1]}\nMessage: {fb[2]}\n-----')
-
-		# Разбиваем на несколько сообщений если слишком длинное
-	for chunk in [response[i:i+3] for i in range(0, len(response), 3)]:
-		await message.answer('\n'.join(chunk))
-
-#Добавим обработку фидбеков
-@router.message(Command('resolve_fb'))
-async def resolve_feedback(message: types.Message):
-	"""Пометить фидбек как обработанный"""
-	if message.from_user.id != ADMIN_ID:
-		return
-
-	try:
-		fb_id = int(message.text.split()[1])
-		async with aiosqlite.connect(SQLITE_DB_PATH) as db:
-			await db.execute(
-				"UPDATE feedback SET status = 'processed' WHERE id = ?",
-				(fb_id,)
-			)
-			await db.commit()
-		await message.answer(f"✅ Фидбек #{fb_id} помечен как обработанный")
-	except (IndexError, ValueError):
-		await message.answer('Использование: /resolve_fb <id_фидбека>')
 #-------------------------------------------------------------------------------------------------------#
-@router.message(Command('help'))
+@user_router.message(Command('help'))
 async def help_command(message: types.Message):
 	# Проверяем, является ли пользователь админом
 	if is_admin(message.from_user.id):
@@ -320,11 +288,12 @@ async def help_command(message: types.Message):
 	                     reply_markup = builder.as_markup(resize_keyboard = True),
 	                     parse_mode = 'HTML')
 #-------------------------------------------------------------------------------------------------------#
-@router.message(Command('clear_context'))
+@user_router.message(Command('clear_context'))
 async def clear_context_handler(message: types.Message):
 	await ContextManager.clear_context(message.from_user.id)
 	await message.answer("🧹 Контекст диалога очищен. Я забыл все предыдущие обсуждения.")
 #-------------------------------------------------------------------------------------------------------#
+
 #-------------------------------------------------------------------------------------------------------#
 #-------------------------------------------------------------------------------------------------------#
 #-------------------------------------------------------------------------------------------------------#
@@ -334,26 +303,27 @@ async def clear_context_handler(message: types.Message):
 
 #-------------------------------------------------------------------------------------------------------#
 #Кнопка фидбека в главном меню
-@router.message(F.text == "💬 Оставить отзыв")
+@user_router.message(F.text == "💬 Оставить отзыв")
 async def feedback_button(message: types.Message):
 	await feedback_cmd(message)
 #вступительное сообщение Должно быть в конце
-@router.message()
+@user_router.message(F.text)
 async def intro_message(message: types.Message):
-	welcome_text = (
-		"🌿 Добро пожаловать в \"Чистый Ум\" — бота-наставника на пути мужской силы и ясности разума.\n\n"
-		"Здесь ты научишься:\n"
-		"— Воздержанию и дисциплине\n"
-		"— Контролю над импульсами\n"
-		"— Самонаблюдению и программированию\n\n"
-		"Я не просто бот. Я — твой спутник.\n"
-		"Нажми /start и начнём путь 👣")
+	welcome_text = ("""
+	💡 Факт для размышления: 90% мыслей, которые крутятся у нас в голове — это повторы вчерашних. Чтобы измениться, нужно научиться задавать себе новые вопросы.
+🌿 В команде /ask ты можешь:
+— Задать любой вопрос о воздержании, дисциплине, мотивации
+— Получить совет или практику от ИИ‑наставника
+— Найти поддержку в моменты сомнений
+🤝 Я отвечаю без осуждений, только по делу и с заботой о твоём развитии.
+👉 Попробуй прямо сейчас: напиши /ask как справиться с ленью
+	""")
 
 	#Добавить кнопку фидбека в главное меню:
 	keyboard = ReplyKeyboardMarkup(
 		keyboard=[
 			[KeyboardButton(text="💬 Оставить отзыв")],
-			[KeyboardButton(text="/start"), KeyboardButton(text="/help")]
+			[KeyboardButton(text="/ask"), KeyboardButton(text="/help")]
 		],
 		resize_keyboard = True
 	)
