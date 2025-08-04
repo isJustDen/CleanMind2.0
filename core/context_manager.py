@@ -170,14 +170,21 @@ class ContextManager:
 
 	@staticmethod
 	async def clear_context(user_id: int):
-		"""Полная очистка контекста"""
+		"""Полная очистка контекста пользователя с обработкой ошибок и транзакцией"""
 		try:
 			async with aiosqlite.connect(SQLITE_DB_PATH) as db:
 				await db.execute(
 					"DELETE FROM conversation_history WHERE user_id = ?",
 				     (user_id, )
 				)
+				print(f"История пользователя {user_id} успешно очищен")
+				await db.execute(
+					"DELETE FROM context_cache WHERE user_id = ?",
+					(user_id,)
+				)
 				await db.commit()
+				print(f"Кэш контекста пользователя {user_id} успешно очищен")
+
 				# logger.info(f"Cleared context for user {user_id}")
 		except Exception as e:
 			#logger.error(f"Error clearing context: {e}")

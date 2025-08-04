@@ -288,10 +288,28 @@ async def help_command(message: types.Message):
 	                     reply_markup = builder.as_markup(resize_keyboard = True),
 	                     parse_mode = 'HTML')
 #-------------------------------------------------------------------------------------------------------#
+
 @user_router.message(Command('clear_context'))
 async def clear_context_handler(message: types.Message):
-	await ContextManager.clear_context(message.from_user.id)
-	await message.answer("🧹 Контекст диалога очищен. Я забыл все предыдущие обсуждения.")
+	""" Очистка памяти нейронки (безвозвратная)"""
+	keyboard = InlineKeyboardMarkup(
+		inline_keyboard=[
+		[
+			InlineKeyboardButton(text = "✅ Да, очистить", callback_data="confirm_clear"),
+			InlineKeyboardButton(text = "❌ Отмена", callback_data="cancel_clear"),
+		]
+	])
+	await message.answer( "⚠️ Ты точно хочешь очистить память диалога? Это действие нельзя отменить.",
+	                      reply_markup=keyboard)
+
+	# --- Обработка подтверждения ---
+@user_router.callback_query(lambda c: c.data in ['confirm_clear', 'cancel_clear'])
+async def process_clear_callback(callback: CallbackQuery):
+	if callback.data == 'confirm_clear':
+		await ContextManager.clear_context(callback.from_user.id)
+		await callback.message.edit_text("🧹 Контекст диалога очищен. Я забыл все предыдущие обсуждения.")
+	else:
+		await callback.message.edit_text("❎ Отмена. Контекст сохранён.")
 #-------------------------------------------------------------------------------------------------------#
 
 #-------------------------------------------------------------------------------------------------------#

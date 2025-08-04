@@ -3,21 +3,16 @@
 import asyncio
 # import logging
 import os
+from pathlib import Path
 
 import aiosqlite
 from aiogram import Bot, Dispatcher
 from bot.handlers import user_router
 from bot.scheduler import setup_scheduler
-from config import BOT_TOKEN, SQLITE_DB_PATH
+from config import BOT_TOKEN, SQLITE_DB_PATH, USERS_JSON_PATH, CONFIG_DIR, DB_DIR
 from db.database import init_db
 from bot.admin import admin_router
 
-
-
-# logging.basicConfig(
-#     level=logging.DEBUG,
-#     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-# )
 async def main():
     bot = None
     try:
